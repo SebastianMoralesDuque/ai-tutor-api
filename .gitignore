@@ -6,34 +6,32 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-.eggs/
+*.egg
 
-# Virtual environments
+# Virtual environment
 venv/
 .venv/
-env/
+ENV/
 
-# Environment variables
+# Environment
 .env
 
 # Database
 *.db
-*.db-journal
-data/
+*.sqlite3
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
 
 # OS
 .DS_Store
 Thumbs.db
 
 # Docker
-docker-compose.override.yml
+data/
 
 # Logs
 *.log
