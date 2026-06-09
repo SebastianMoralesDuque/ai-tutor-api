@@ -1,0 +1,61 @@
+"""
+Tutor service — free-form chat with memory context.
+"""
+
+from sqlalchemy.orm import Session
+
+from app.core.ai_client import AIClient
+from app.db.repository import (
+    UserRepository,
+    ConceptRepository,
+    UserConceptRepository,
+    MistakeRepository,
+)
+
+
+class TutorService:
+    def __init__(self, db: Session, ai: AIClient):
+        self.users = UserRepository(db)
+        self.concepts = ConceptRepository(db)
+        self.user_concepts = UserConceptRepository(db)
+        self.mistakes = MistakeRepository(db)
+        self.ai = ai
+
+    def chat(self, user_id: str, message: str) -> str:
+        """
+        Send a message to the tutor with full student memory.
+        """
+        user = self.users.get(user_id)
+        if not user:
+            raise ValueError(f"User {user_id} not found")
+
+        # Build context from user's learning history
+        all_uc = self.user_concepts.get_all_for_user(user_id)
+        weak = []
+        for uc in all_uc:
+            if uc.mastery_level < 40:
+                concept = self.concepts.get(uc.concept_id)
+                if concept:
+                    weak.append(concept.name)
+
+        recent_mistakes_raw = self.mistakes.get_recent(user_id, limit=3)
+        mistakes = [
+            {
+                "concept": (
+                    self.concepts.get(m.concept_id).name
+                    if self.concepts.get(m.concept_id)
+                    else "unknown"
+                ),
+                "error_description": m.error_description,
+            }
+            for m in recent_mistakes_raw
+        ]
+
+        context = {
+            "topic": user.topic,
+            "weak_concepts": weak,
+            "recent_mistakes": mistakes,
+            "streak": 0,  # Could compute, but keep lightweight
+        }
+
+        return self.ai.chat(message, context)
