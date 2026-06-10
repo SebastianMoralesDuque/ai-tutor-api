@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     DEBUG: bool = True
 
     # Database — SQLite by default, PostgreSQL-ready
-    DATABASE_URL: str = "sqlite:///./ai_tutor.db"
+    DATABASE_URL: str = "sqlite:////app/data/ai_tutor.db"
 
     # AI provider — OpenCode Zen (DeepSeek V4 Flash Free, no key needed)
     AI_PROVIDER: str = "opencode"  # "mock" | "opencode"

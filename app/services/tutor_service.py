@@ -1,7 +1,9 @@
 """
-Tutor service — free-form chat with memory context.
+Tutor service — free-form chat with persistent memory context.
+The tutor learns about the user over time.
 """
 
+import json
 from sqlalchemy.orm import Session
 
 from app.core.ai_client import AIClient
@@ -10,6 +12,8 @@ from app.db.repository import (
     ConceptRepository,
     UserConceptRepository,
     MistakeRepository,
+    UserMemoryRepository,
+    SessionRepository,
 )
 
 
@@ -19,6 +23,8 @@ class TutorService:
         self.concepts = ConceptRepository(db)
         self.user_concepts = UserConceptRepository(db)
         self.mistakes = MistakeRepository(db)
+        self.memory = UserMemoryRepository(db)
+        self.sessions = SessionRepository(db)
         self.ai = ai
 
     def chat(self, user_id: str, message: str) -> str:
@@ -33,7 +39,7 @@ class TutorService:
         all_uc = self.user_concepts.get_all_for_user(user_id)
         weak = []
         for uc in all_uc:
-            if uc.mastery_level < 40:
+            if uc.mastery_level < 40 and not uc.completed:
                 concept = self.concepts.get(uc.concept_id)
                 if concept:
                     weak.append(concept.name)
@@ -51,11 +57,19 @@ class TutorService:
             for m in recent_mistakes_raw
         ]
 
+        # Get persistent memory
+        mem_ctx = self.memory.get_context_dict(user_id)
+
+        # Get streak
+        streak = self.sessions.count_streak(user_id)
+
         context = {
-            "topic": user.topic,
+            "topic": user.current_topic,
             "weak_concepts": weak,
             "recent_mistakes": mistakes,
-            "streak": 0,  # Could compute, but keep lightweight
+            "streak": streak,
+            "interests": mem_ctx.get("interests", []),
+            "topics_studied": mem_ctx.get("topics_studied", []),
         }
 
         return self.ai.chat(message, context)

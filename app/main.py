@@ -42,10 +42,12 @@ app.add_middleware(
 from app.api.routes.user import router as user_router
 from app.api.routes.learning import router as learning_router
 from app.api.routes.chat import router as chat_router
+from app.api.routes.suggestions import router as suggestions_router
 
 app.include_router(user_router)
 app.include_router(learning_router)
 app.include_router(chat_router)
+app.include_router(suggestions_router)
 
 
 @app.get("/health")

@@ -18,7 +18,17 @@ class QuizQuestion(BaseModel):
     question_id: str
     question: str
     options: list[str]
+    correct_answer_index: int = -1
     answer_type: Literal["multiple_choice"] = "multiple_choice"
+
+
+class CycleInfo(BaseModel):
+    topic: str
+    concept: str
+    concept_index: int
+    day_in_cycle: int
+    total_concepts: int
+    topic_completed: bool
 
 
 class DailySessionRequest(BaseModel):
@@ -28,6 +38,7 @@ class DailySessionRequest(BaseModel):
 class DailySessionResponse(BaseModel):
     lesson: LessonBlock
     quiz: list[QuizQuestion]
+    cycle_info: CycleInfo
 
 
 # ── Submit Answer ────────────────────────────────────────────────────

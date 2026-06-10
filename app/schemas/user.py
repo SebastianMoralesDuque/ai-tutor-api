@@ -13,13 +13,15 @@ class UserCreate(BaseModel):
 
 class UserResponse(BaseModel):
     id: str
-    topic: str
+    current_topic: str
     daily_time: int
-    created_at: datetime
+    current_concept_index: int
+    concept_day: int
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
 
 class UserUpdate(BaseModel):
-    topic: Optional[str] = Field(None, max_length=255)
+    current_topic: Optional[str] = Field(None, max_length=255)
     daily_time: Optional[int] = Field(None, ge=5, le=120)

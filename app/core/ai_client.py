@@ -24,7 +24,8 @@ class AIClient(ABC):
 
     @abstractmethod
     def generate_lesson(
-        self, topic: str, concepts: list[str], mistakes: list[dict], daily_time: int
+        self, topic: str, concepts: list[str], mistakes: list[dict], daily_time: int,
+        day_in_cycle: int = 1, concept_type: str = "fundamentals",
     ) -> dict:
         """Generate a structured lesson block."""
 
@@ -53,7 +54,8 @@ class MockAIClient(AIClient):
     """
 
     def generate_lesson(
-        self, topic: str, concepts: list[str], mistakes: list[dict], daily_time: int
+        self, topic: str, concepts: list[str], mistakes: list[dict], daily_time: int,
+        day_in_cycle: int = 1, concept_type: str = "fundamentals",
     ) -> dict:
         weak_concepts = [m.get("concept", "a concept") for m in mistakes[:3]]
         focus = ", ".join(weak_concepts) if weak_concepts else ", ".join(concepts[:3])
@@ -94,6 +96,7 @@ class MockAIClient(AIClient):
                     f"An unrelated concept to {concept}",
                     f"None of the above",
                 ],
+                "correct_answer_index": 0,
                 "answer_type": "multiple_choice",
                 "_concept": concept,
             })
@@ -109,6 +112,7 @@ class MockAIClient(AIClient):
                     "An unrelated option",
                     "None of the above",
                 ],
+                "correct_answer_index": 0,
                 "answer_type": "multiple_choice",
                 "_concept": m.get("concept", topic),
             })
@@ -204,11 +208,12 @@ class OpenCodeClient(AIClient):
         return json.loads(cleaned)
 
     def generate_lesson(
-        self, topic: str, concepts: list[str], mistakes: list[dict], daily_time: int
+        self, topic: str, concepts: list[str], mistakes: list[dict], daily_time: int,
+        day_in_cycle: int = 1, concept_type: str = "fundamentals",
     ) -> dict:
         from app.core.prompt_builder import build_lesson_prompt
 
-        prompt = build_lesson_prompt(topic, concepts, mistakes, daily_time)
+        prompt = build_lesson_prompt(topic, concepts, mistakes, daily_time, day_in_cycle, concept_type)
         messages = [
             {"role": "system", "content": prompt["system"]},
             {"role": "user", "content": prompt["user"]},
@@ -230,7 +235,7 @@ class OpenCodeClient(AIClient):
     ) -> list[dict]:
         from app.core.prompt_builder import build_quiz_prompt
 
-        prompt = build_quiz_prompt(topic, lesson, mistakes)
+        prompt = build_quiz_prompt(topic, lesson, concepts, mistakes)
         messages = [
             {"role": "system", "content": prompt["system"]},
             {"role": "user", "content": prompt["user"]},
@@ -239,15 +244,33 @@ class OpenCodeClient(AIClient):
         try:
             raw = self._chat(messages, temperature=0.6)
             parsed = self._parse_json(raw)
+
+            if not isinstance(parsed, list):
+                return []
+
             questions = []
-            for q in parsed if isinstance(parsed, list) else []:
+            for i, q in enumerate(parsed):
+                # Validate structure
+                question_text = q.get("question", "").strip()
+                options = q.get("options", [])
+                correct_index = q.get("correct_index", -1)
+                concept = q.get("concept", concepts[i] if i < len(concepts) else topic)
+
+                # Skip invalid questions
+                if not question_text or len(options) != 4:
+                    continue
+                if not isinstance(correct_index, int) or correct_index not in (0, 1, 2, 3):
+                    continue
+
                 questions.append({
                     "question_id": f"q_{uuid.uuid4().hex[:8]}",
-                    "question": q.get("question", ""),
-                    "options": q.get("options", []),
+                    "question": question_text,
+                    "options": options,
+                    "correct_answer_index": correct_index,
                     "answer_type": "multiple_choice",
-                    "_concept": concepts[0] if concepts else topic,
+                    "_concept": concept,
                 })
+
             return questions[:5]
         except Exception:
             return []
@@ -257,18 +280,18 @@ class OpenCodeClient(AIClient):
             {
                 "role": "system",
                 "content": (
-                    "You are a quiz evaluator. Given a question, options, and a student's answer, "
-                    "evaluate if it's correct. Return JSON: {\"correct\": bool, \"feedback\": str}. "
-                    "Be encouraging but accurate."
+                    "Eres un evaluador de cuestionarios. Dada una pregunta, opciones y la respuesta "
+                    "del estudiante, evalúa si es correcta. Devuelve JSON: {\"correct\": bool, \"feedback\": str}. "
+                    "Sé alentador pero preciso. Responde siempre en español."
                 ),
             },
             {
                 "role": "user",
                 "content": (
-                    f"Question: {question}\n"
-                    f"Options: {json.dumps(options)}\n"
-                    f"Student answer: {answer}\n"
-                    "Evaluate and return JSON."
+                    f"Pregunta: {question}\n"
+                    f"Opciones: {json.dumps(options)}\n"
+                    f"Respuesta del estudiante: {answer}\n"
+                    "Evalúa y devuelve JSON."
                 ),
             },
         ]
