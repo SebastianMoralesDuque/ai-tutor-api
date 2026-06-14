@@ -1,26 +1,30 @@
 """User management endpoints."""
 
+import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
+from app.core.config import limiter
 from app.db.database import get_db
 from app.db.models import User
 from app.db.repository import UserRepository, TopicProgressRepository, UserMemoryRepository
+from app.schemas.user import UserCreate, UserUpdate, UserResponse
 
+logger = logging.getLogger("ai-tutor.routes.user")
 router = APIRouter(prefix="/api/users", tags=["users"])
 
 
-@router.post("/", status_code=201)
-def create_user(payload: dict, db: Session = Depends(get_db)):
-    topic = payload.get("topic", "")
-    daily_time = payload.get("daily_time", 20)
+@router.post("/", status_code=201, response_model=UserResponse)
+@limiter.limit("30/minute")
+def create_user(request: Request, payload: UserCreate, db: Session = Depends(get_db)):
+    logger.info("Creating user: topic=%s daily_time=%d", payload.topic, payload.daily_time)
 
     repo = UserRepository(db)
     user = User(
-        current_topic=topic,
-        daily_time=daily_time,
+        current_topic=payload.topic,
+        daily_time=payload.daily_time,
         current_concept_index=0,
         concept_day=1,
         concept_start_date=datetime.now(timezone.utc),
@@ -28,9 +32,9 @@ def create_user(payload: dict, db: Session = Depends(get_db)):
     created = repo.create(user)
 
     # Create topic progress
-    if topic:
+    if payload.topic:
         topics_repo = TopicProgressRepository(db)
-        topics_repo.get_or_create(created.id, topic)
+        topics_repo.get_or_create(created.id, payload.topic)
 
     # Create user memory
     memory_repo = UserMemoryRepository(db)
@@ -46,8 +50,9 @@ def create_user(payload: dict, db: Session = Depends(get_db)):
     }
 
 
-@router.get("/{user_id}")
-def get_user(user_id: str, db: Session = Depends(get_db)):
+@router.get("/{user_id}", response_model=UserResponse)
+@limiter.limit("30/minute")
+def get_user(request: Request, user_id: str, db: Session = Depends(get_db)):
     repo = UserRepository(db)
     user = repo.get(user_id)
     if not user:
@@ -62,10 +67,18 @@ def get_user(user_id: str, db: Session = Depends(get_db)):
     }
 
 
-@router.patch("/{user_id}")
-def update_user(user_id: str, payload: dict, db: Session = Depends(get_db)):
+@router.patch("/{user_id}", response_model=UserResponse)
+@limiter.limit("30/minute")
+def update_user(request: Request, user_id: str, payload: UserUpdate, db: Session = Depends(get_db)):
     repo = UserRepository(db)
-    fields = {k: v for k, v in payload.items() if v is not None}
+
+    # Build update dict from non-None fields
+    fields = {}
+    if payload.current_topic is not None:
+        fields["current_topic"] = payload.current_topic
+    if payload.daily_time is not None:
+        fields["daily_time"] = payload.daily_time
+
     if not fields:
         raise HTTPException(status_code=400, detail="No fields to update")
 

@@ -52,7 +52,7 @@ class LearningService:
             f"{topic} advanced",
         ]
 
-    def generate_daily_session(self, user_id: str) -> dict:
+    async def generate_daily_session(self, user_id: str) -> dict:
         """
         Core loop with 3-day cycle:
         1. Load user + determine current concept + day
@@ -97,7 +97,7 @@ class LearningService:
         ]
 
         # ── Generate lesson (focused on current concept) ──
-        lesson = self.ai.generate_lesson(
+        lesson = await self.ai.generate_lesson(
             topic=topic,
             concepts=[current_concept],
             mistakes=mistakes,
@@ -107,12 +107,18 @@ class LearningService:
         )
 
         # ── Generate quiz (3 questions about this concept) ──
-        quiz = self.ai.generate_quiz(
+        quiz = await self.ai.generate_quiz(
             topic=topic,
             lesson=lesson,
             concepts=[current_concept],
             mistakes=mistakes,
         )
+
+        # ── Validate correctAnswerIndex for each question (safety net) ──
+        quiz = [
+            q for q in quiz
+            if isinstance(q.get("correct_answer_index"), int) and 0 <= q["correct_answer_index"] <= 3
+        ]
 
         # ── Record learning session ──
         from app.db.models import LearningSession
@@ -199,7 +205,7 @@ class LearningService:
                 concept_start_date=None,
             )
 
-    def submit_answer(self, user_id: str, question_id: str, answer: str) -> dict:
+    async def submit_answer(self, user_id: str, question_id: str, answer: str) -> dict:
         """
         Evaluate answer by looking up the question in DB.
         No AI for basic correct/incorrect — just compare indices.
@@ -256,11 +262,12 @@ class LearningService:
             feedback = "¡Correcto! Bien hecho."
         else:
             correct_option = options[correct_index] if correct_index < len(options) else "la respuesta correcta"
-            feedback = self.ai.evaluate_answer(
+            result = await self.ai.evaluate_answer(
                 question=db_question.question,
                 options=options,
                 answer=answer,
-            ).get("feedback", f"La respuesta correcta es: {correct_option}")
+            )
+            feedback = result.get("feedback", f"La respuesta correcta es: {correct_option}")
 
         # Record mistake if wrong
         if not correct:

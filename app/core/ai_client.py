@@ -6,11 +6,14 @@ Uses httpx for direct HTTP calls, zero external AI SDKs.
 """
 
 import json
+import logging
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 import httpx
+
+logger = logging.getLogger("ai-tutor.ai")
 
 
 @dataclass
@@ -23,25 +26,33 @@ class AIClient(ABC):
     """Abstract base — all AI providers implement this."""
 
     @abstractmethod
-    def generate_lesson(
+    async def generate_lesson(
         self, topic: str, concepts: list[str], mistakes: list[dict], daily_time: int,
         day_in_cycle: int = 1, concept_type: str = "fundamentals",
     ) -> dict:
         """Generate a structured lesson block."""
 
     @abstractmethod
-    def generate_quiz(
+    async def generate_quiz(
         self, topic: str, lesson: dict, concepts: list[str], mistakes: list[dict]
     ) -> list[dict]:
         """Generate quiz questions based on the lesson."""
 
     @abstractmethod
-    def evaluate_answer(self, question: str, options: list[str], answer: str) -> dict:
+    async def evaluate_answer(self, question: str, options: list[str], answer: str) -> dict:
         """Evaluate a user's answer. Returns {correct, feedback, concept}."""
 
     @abstractmethod
-    def chat(self, message: str, context: dict) -> str:
+    async def chat(self, message: str, context: dict) -> str:
         """Free-form tutor chat with memory context."""
+
+    @abstractmethod
+    async def chat_completion(self, messages: list[dict], temperature: float = 0.7, max_tokens: int = 2048) -> str:
+        """Low-level chat completion call."""
+
+    @abstractmethod
+    async def close(self):
+        """Close any open resources (HTTP clients, connections, etc.)."""
 
 
 # ── Mock Client (for testing without network) ────────────────────────
@@ -53,7 +64,7 @@ class MockAIClient(AIClient):
     Returns structured JSON without any API calls.
     """
 
-    def generate_lesson(
+    async def generate_lesson(
         self, topic: str, concepts: list[str], mistakes: list[dict], daily_time: int,
         day_in_cycle: int = 1, concept_type: str = "fundamentals",
     ) -> dict:
@@ -81,7 +92,7 @@ class MockAIClient(AIClient):
             ),
         }
 
-    def generate_quiz(
+    async def generate_quiz(
         self, topic: str, lesson: dict, concepts: list[str], mistakes: list[dict]
     ) -> list[dict]:
         questions = []
@@ -119,7 +130,7 @@ class MockAIClient(AIClient):
 
         return questions[:5]
 
-    def evaluate_answer(self, question: str, options: list[str], answer: str) -> dict:
+    async def evaluate_answer(self, question: str, options: list[str], answer: str) -> dict:
         first_option = options[0] if options else ""
         correct = answer.strip() in ("0", "a", "A") or answer.strip() == first_option
 
@@ -132,7 +143,7 @@ class MockAIClient(AIClient):
             ),
         }
 
-    def chat(self, message: str, context: dict) -> str:
+    async def chat(self, message: str, context: dict) -> str:
         topic = context.get("topic", "your topic")
         weak = context.get("weak_concepts", [])
         streak = context.get("streak", 0)
@@ -149,6 +160,14 @@ class MockAIClient(AIClient):
             f"let me break this down for you in a way that builds on what you already know."
         )
 
+    async def chat_completion(self, messages: list[dict], temperature: float = 0.7, max_tokens: int = 2048) -> str:
+        """Mock completion for interface compatibility."""
+        return json.dumps({"content": "Mock response from MockAIClient"})
+
+    async def close(self):
+        """Mock client has no resources to close."""
+        pass
+
 
 # ── OpenCode Zen Client (DeepSeek V4 Flash Free, no key) ────────────
 
@@ -162,9 +181,9 @@ class OpenCodeClient(AIClient):
     def __init__(self, model: str = "deepseek-v4-flash-free", base_url: str = "https://opencode.ai/zen/v1"):
         self.model = model
         self.base_url = base_url.rstrip("/")
-        self.client = httpx.Client(timeout=60.0)
+        self.client = httpx.AsyncClient(timeout=60.0)
 
-    def _chat(self, messages: list[dict], temperature: float = 0.7, max_tokens: int = 2048) -> str:
+    async def chat_completion(self, messages: list[dict], temperature: float = 0.7, max_tokens: int = 2048) -> str:
         """Low-level chat completion call."""
         payload = {
             "model": self.model,
@@ -173,7 +192,8 @@ class OpenCodeClient(AIClient):
             "max_tokens": max_tokens,
         }
 
-        response = self.client.post(f"{self.base_url}/chat/completions", json=payload)
+        logger.debug("AI request: model=%s messages=%d", self.model, len(messages))
+        response = await self.client.post(f"{self.base_url}/chat/completions", json=payload)
         response.raise_for_status()
 
         data = response.json()
@@ -207,7 +227,7 @@ class OpenCodeClient(AIClient):
 
         return json.loads(cleaned)
 
-    def generate_lesson(
+    async def generate_lesson(
         self, topic: str, concepts: list[str], mistakes: list[dict], daily_time: int,
         day_in_cycle: int = 1, concept_type: str = "fundamentals",
     ) -> dict:
@@ -220,7 +240,7 @@ class OpenCodeClient(AIClient):
         ]
 
         try:
-            raw = self._chat(messages, temperature=0.7)
+            raw = await self.chat_completion(messages, temperature=0.7)
             return self._parse_json(raw)
         except Exception:
             return {
@@ -230,7 +250,7 @@ class OpenCodeClient(AIClient):
                 "example": f"Example for {topic}: apply these concepts step by step.",
             }
 
-    def generate_quiz(
+    async def generate_quiz(
         self, topic: str, lesson: dict, concepts: list[str], mistakes: list[dict]
     ) -> list[dict]:
         from app.core.prompt_builder import build_quiz_prompt
@@ -242,7 +262,7 @@ class OpenCodeClient(AIClient):
         ]
 
         try:
-            raw = self._chat(messages, temperature=0.6)
+            raw = await self.chat_completion(messages, temperature=0.6)
             parsed = self._parse_json(raw)
 
             if not isinstance(parsed, list):
@@ -275,7 +295,7 @@ class OpenCodeClient(AIClient):
         except Exception:
             return []
 
-    def evaluate_answer(self, question: str, options: list[str], answer: str) -> dict:
+    async def evaluate_answer(self, question: str, options: list[str], answer: str) -> dict:
         messages = [
             {
                 "role": "system",
@@ -297,12 +317,12 @@ class OpenCodeClient(AIClient):
         ]
 
         try:
-            raw = self._chat(messages, temperature=0.3)
+            raw = await self.chat_completion(messages, temperature=0.3)
             return self._parse_json(raw)
         except Exception:
             return {"correct": False, "feedback": "Could not evaluate. Please try again."}
 
-    def chat(self, message: str, context: dict) -> str:
+    async def chat(self, message: str, context: dict) -> str:
         from app.core.prompt_builder import build_chat_prompt
 
         prompt = build_chat_prompt(message, context)
@@ -312,23 +332,35 @@ class OpenCodeClient(AIClient):
         ]
 
         try:
-            return self._chat(messages, temperature=0.7)
+            return await self.chat_completion(messages, temperature=0.7)
         except Exception:
             return "I'm having trouble connecting to my knowledge base. Please try again."
 
+    async def close(self):
+        """Close the underlying httpx AsyncClient."""
+        await self.client.aclose()
 
-# ── Factory ──────────────────────────────────────────────────────────
+
+# ── Factory (cached singleton) ──────────────────────────────────────
+
+_client_instance: AIClient | None = None
 
 
 def get_ai_client() -> AIClient:
-    """Factory — returns the configured AI client."""
+    """Factory — returns the configured AI client (cached singleton)."""
+    global _client_instance
+    if _client_instance is not None:
+        return _client_instance
+
     from app.core.config import settings
 
     if settings.AI_PROVIDER == "mock":
-        return MockAIClient()
-    if settings.AI_PROVIDER == "opencode":
-        return OpenCodeClient(
+        _client_instance = MockAIClient()
+    elif settings.AI_PROVIDER == "opencode":
+        _client_instance = OpenCodeClient(
             model=settings.AI_MODEL,
             base_url=settings.AI_BASE_URL,
         )
-    return MockAIClient()
+    else:
+        _client_instance = MockAIClient()
+    return _client_instance

@@ -26,6 +26,14 @@ class Settings(BaseSettings):
     MASTERY_INCREASE_ON_CORRECT: float = 10.0
     MASTERY_DECREASE_ON_WRONG: float = -15.0
 
+    # Suggestions fallback (comma-separated list of topic names)
+    SUGGESTIONS_FALLBACK: str = "Ética,Lógica,Epistemología"
+
+    @property
+    def suggestions_fallback_list(self) -> list[str]:
+        """Parse SUGGESTIONS_FALLBACK into a list, stripping whitespace."""
+        return [s.strip() for s in self.SUGGESTIONS_FALLBACK.split(",")]
+
     @property
     def IS_SQLITE(self) -> bool:
         return self.DATABASE_URL.startswith("sqlite")
@@ -34,3 +42,9 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# ── Rate limiting ────────────────────────────────────────────────────
+from slowapi import Limiter  # noqa: E402
+from slowapi.util import get_remote_address  # noqa: E402
+
+limiter = Limiter(key_func=get_remote_address)

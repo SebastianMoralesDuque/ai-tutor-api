@@ -27,7 +27,7 @@ class TutorService:
         self.sessions = SessionRepository(db)
         self.ai = ai
 
-    def chat(self, user_id: str, message: str) -> str:
+    async def chat(self, user_id: str, message: str) -> str:
         """
         Send a message to the tutor with full student memory.
         """
@@ -72,4 +72,4 @@ class TutorService:
             "topics_studied": mem_ctx.get("topics_studied", []),
         }
 
-        return self.ai.chat(message, context)
+        return await self.ai.chat(message, context)
