@@ -1,6 +1,6 @@
 # AI Tutor Backend — API Documentation
 
-> **Versión:** 0.1.0  
+> **Versión:** 0.2.0  
 > **Base URL:** `https://ai-tutor.sebastianmorales.sbs`  
 > **AI Provider:** OpenCode Zen — DeepSeek V4 Flash Free (gratis, sin API key)
 
@@ -9,23 +9,45 @@
 ## Tabla de Contenidos
 
 1. [Autenticación](#autenticación)
-2. [Endpoints](#endpoints)
+2. [Conceptos clave](#conceptos-clave)
+3. [Endpoints](#endpoints)
    - [Health Check](#health-check)
    - [Usuarios](#usuarios)
    - [Sesión Diaria](#sesión-diaria)
    - [Enviar Respuesta](#enviar-respuesta)
    - [Progreso](#progreso)
    - [Chat Tutor](#chat-tutor)
-3. [Modelos de Datos](#modelos-de-datos)
-4. [Flujo de Uso](#flujo-de-uso)
-5. [Configuración](#configuración)
-6. [Errores](#errores)
+   - [Sugerencias](#sugerencias)
+4. [Ciclo de aprendizaje](#ciclo-de-aprendizaje)
+5. [Modelos de Datos](#modelos-de-datos)
+6. [Flujo de Uso](#flujo-de-uso)
+7. [Configuración](#configuración)
+8. [Errores](#errores)
 
 ---
 
 ## Autenticación
 
-Actualmente la API no requiere autenticación. Para producción, se recomienda agregar JWT o API keys.
+Actualmente la API no requiere autenticación. Los usuarios se identifican por UUID.
+
+---
+
+## Conceptos clave
+
+| Concepto | Descripción |
+|---|---|
+| **Topic** | El tema general que el usuario elige (ej: "ontología", "solipsismo") |
+| **Concepto** | Sub-división dentro del topic. Cada topic tiene 3: fundamentals, practice, advanced |
+| **Ciclo** | 3 conceptos × 3 días = 9 días por topic |
+| **Día** | Cada vez que el usuario llama a `/daily-session`, avanza un día |
+
+```
+Topic: "ontología" (9 días total)
+├── Concepto 0: ontología fundamentals  → día 1, 2, 3
+├── Concepto 1: ontología practice      → día 4, 5, 6
+└── Concepto 2: ontología advanced      → día 7, 8, 9
+    └── Topic completado → usuario elige nuevo topic
+```
 
 ---
 
@@ -41,7 +63,7 @@ GET /health
 ```json
 {
   "status": "ok",
-  "version": "0.1.0"
+  "version": "0.2.0"
 }
 ```
 
@@ -58,8 +80,8 @@ POST /api/users/
 **Body:**
 ```json
 {
-  "topic": "Python",
-  "daily_time": 20
+  "topic": "ontología",
+  "daily_time": 15
 }
 ```
 
@@ -71,12 +93,20 @@ POST /api/users/
 **Respuesta (201):**
 ```json
 {
-  "id": "a1b2c3d4e5f6...",
-  "topic": "Python",
-  "daily_time": 20,
-  "created_at": "2026-06-09T14:00:00Z"
+  "id": "fd3878bf89f7...",
+  "current_topic": "ontología",
+  "daily_time": 15,
+  "current_concept_index": 0,
+  "concept_day": 1,
+  "created_at": "2026-06-10T20:41:15.410970"
 }
 ```
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `current_topic` | string | Topic activo |
+| `current_concept_index` | int | 0=fundamentals, 1=practice, 2=advanced |
+| `concept_day` | int | Día actual dentro del concepto (1, 2, 3) |
 
 ---
 
@@ -86,20 +116,7 @@ POST /api/users/
 GET /api/users/{user_id}
 ```
 
-**Parámetros de ruta:**
-| Parámetro | Tipo | Descripción |
-|-----------|------|-------------|
-| `user_id` | string | ID del usuario |
-
-**Respuesta (200):**
-```json
-{
-  "id": "a1b2c3d4e5f6...",
-  "topic": "Python",
-  "daily_time": 20,
-  "created_at": "2026-06-09T14:00:00Z"
-}
-```
+**Respuesta (200):** Igual que crear usuario.
 
 ---
 
@@ -112,10 +129,15 @@ PATCH /api/users/{user_id}
 **Body (parcial):**
 ```json
 {
-  "topic": "Machine Learning",
+  "current_topic": "epistemología",
   "daily_time": 30
 }
 ```
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `current_topic` | string | Cambiar topic (crea topic_progress automáticamente) |
+| `daily_time` | int | Cambiar tiempo de estudio |
 
 **Respuesta (200):** Objeto usuario actualizado.
 
@@ -123,7 +145,7 @@ PATCH /api/users/{user_id}
 
 ### Sesión Diaria
 
-> **El endpoint principal.** Genera una lección + quiz personalizado usando IA.
+> **El endpoint principal.** Genera lección + quiz para el concepto actual del usuario. Avanza el ciclo automáticamente.
 
 ```
 POST /api/daily-session
@@ -132,7 +154,7 @@ POST /api/daily-session
 **Body:**
 ```json
 {
-  "user_id": "a1b2c3d4e5f6..."
+  "user_id": "fd3878bf89f7..."
 }
 ```
 
@@ -140,41 +162,88 @@ POST /api/daily-session
 ```json
 {
   "lesson": {
-    "title": "Understanding Python: decorators, generics",
-    "explanation": "Today we're diving deeper into Python. We'll focus on decorators, generics — areas where you've had some difficulty...",
+    "title": "Fundamentos de la Ontología",
+    "explanation": "La ontología es la rama de la filosofía que estudia la naturaleza del ser...",
     "bullets": [
-      "Key concept: decorators",
-      "Key concept: generics",
-      "Review: previous mistake"
+      "La ontología estudia qué entidades existen",
+      "Se divide en ontología general y especial",
+      "Los problemas ontológicos fundamentales incluyen..."
     ],
-    "example": "For example, in Python, when you encounter decorators, remember to apply the fundamental principle step by step."
+    "example": "Un ejemplo clásico es la pregunta: ¿existen los números o son una construcción humana?"
   },
   "quiz": [
     {
-      "question_id": "q_a1b2c3d4",
-      "question": "In the context of Python, what best describes decorators?",
+      "question_id": "q_349ed59f",
+      "question": "¿Qué estudia principalmente la ontología?",
       "options": [
-        "The correct understanding of decorators",
-        "A common misconception about decorators",
-        "An unrelated concept to decorators",
-        "None of the above"
+        "La naturaleza del ser y la existencia",
+        "Las reglas del lógico formal",
+        "La estructura del argumento válido",
+        "Los métodos de investigación científica"
       ],
+      "correct_answer_index": 0,
+      "answer_type": "multiple_choice"
+    },
+    {
+      "question_id": "q_65bec42e",
+      "question": "¿Cuál de los siguientes NO es un componente típico?",
+      "options": [
+        "Categorías ontológicas",
+        "Relaciones de dependencia",
+        "Teoremas matemáticos",
+        "Niveles de realidad"
+      ],
+      "correct_answer_index": 2,
+      "answer_type": "multiple_choice"
+    },
+    {
+      "question_id": "q_d095f75b",
+      "question": "¿En qué área se aplica la ontología?",
+      "options": [
+        "Filosofía y metafísica",
+        "Biología molecular",
+        "Ingeniería de software",
+        "Contabilidad"
+      ],
+      "correct_answer_index": 0,
       "answer_type": "multiple_choice"
     }
-  ]
+  ],
+  "cycle_info": {
+    "topic": "ontología",
+    "concept": "ontología fundamentals",
+    "concept_index": 0,
+    "day_in_cycle": 1,
+    "total_concepts": 3,
+    "topic_completed": false
+  }
 }
 ```
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
+| `lesson` | object | Lección del día |
 | `lesson.title` | string | Título de la lección |
 | `lesson.explanation` | string | Explicación detallada |
 | `lesson.bullets` | string[] | Puntos clave |
 | `lesson.example` | string | Ejemplo práctico |
-| `quiz` | array | Preguntas de opción múltiple (3–5) |
-| `quiz[].question_id` | string | ID único de la pregunta |
+| `quiz` | array | 3 preguntas de opción múltiple |
+| `quiz[].question_id` | string | ID único (usar en submit-answer) |
 | `quiz[].question` | string | Texto de la pregunta |
-| `quiz[].options` | string[] | 4 opciones de respuesta |
+| `quiz[].options` | string[] | 4 opciones |
+| `quiz[].correct_answer_index` | int | Índice de la respuesta correcta (0-3) |
+| `cycle_info` | object | Estado del ciclo de aprendizaje |
+| `cycle_info.topic` | string | Topic actual |
+| `cycle_info.concept` | string | Concepto estudiado hoy |
+| `cycle_info.concept_index` | int | 0, 1, o 2 |
+| `cycle_info.day_in_cycle` | int | 1, 2, o 3 |
+| `cycle_info.topic_completed` | bool | `true` solo cuando se completan los 9 días |
+
+**Side effects:**
+- Crea registro en `learning_sessions`
+- Crea registros en `quiz_questions`
+- Avanza `concept_day` o `current_concept_index`
+- Si es día 3 del último concepto, marca topic como "completed" y resetea el user
 
 ---
 
@@ -187,9 +256,9 @@ POST /api/submit-answer
 **Body:**
 ```json
 {
-  "user_id": "a1b2c3d4e5f6...",
-  "question_id": "q_a1b2c3d4",
-  "answer": "The correct understanding of decorators"
+  "user_id": "fd3878bf89f7...",
+  "question_id": "q_349ed59f",
+  "answer": "0"
 }
 ```
 
@@ -197,18 +266,18 @@ POST /api/submit-answer
 |-------|------|-------------|
 | `user_id` | string | ID del usuario |
 | `question_id` | string | ID de la pregunta (del quiz) |
-| `answer` | string | Respuesta del usuario (texto exacto de la opción) |
+| `answer` | string | `"0"`, `"1"`, `"2"`, `"3"` o `"a"`, `"b"`, `"c"`, `"d"` |
 
 **Respuesta (200):**
 ```json
 {
   "correct": true,
-  "feedback": "Correct! Well done.",
-  "concept": "decorators",
+  "feedback": "¡Correcto! Bien hecho.",
+  "concept": "ontología fundamentals",
   "mastery_delta": 10.0,
   "updated_progress": {
-    "concept": "decorators",
-    "mastery_level": 45.0,
+    "concept": "ontología fundamentals",
+    "mastery_level": 10.0,
     "correct": true
   }
 }
@@ -219,8 +288,10 @@ POST /api/submit-answer
 | `correct` | boolean | Si la respuesta es correcta |
 | `feedback` | string | Retroalimentación de la IA |
 | `concept` | string | Concepto evaluado |
-| `mastery_delta` | float | Cambio en nivel de dominio (+10 correcta, -15 incorrecta) |
-| `updated_progress` | object | Progreso actualizado del concepto |
+| `mastery_delta` | float | +10 correcta, -15 incorrecta |
+| `updated_progress` | object | Progreso actualizado |
+
+**Nota:** La validación se hace comparando el índice en la DB (sin AI). AI solo genera feedback cuando la respuesta es incorrecta.
 
 ---
 
@@ -233,28 +304,57 @@ GET /api/progress/{user_id}
 **Respuesta (200):**
 ```json
 {
-  "user_id": "a1b2c3d4e5f6...",
-  "topic": "Python",
-  "streak": 5,
+  "user_id": "fd3878bf89f7...",
+  "current_topic": "ontología",
+  "streak": 3,
+  "cycle": {
+    "concept_index": 0,
+    "day_in_cycle": 2,
+    "total_concepts": 3,
+    "days_per_concept": 3
+  },
+  "topic_progress": {
+    "topic": "ontología",
+    "status": "in_progress",
+    "concepts_completed": 0,
+    "started_at": "2026-06-10T20:41:15"
+  },
   "concept_mastery": [
     {
-      "concept": "decorators",
-      "level": 45.0,
-      "last_reviewed": "2026-06-09T14:30:00Z"
+      "concept": "ontología fundamentals",
+      "level": 75.0,
+      "sessions_done": 1,
+      "completed": false,
+      "is_current": true
     },
     {
-      "concept": "generics",
-      "level": 20.0,
-      "last_reviewed": "2026-06-08T14:00:00Z"
+      "concept": "ontología practice",
+      "level": 0.0,
+      "sessions_done": 0,
+      "completed": false,
+      "is_current": false
+    },
+    {
+      "concept": "ontología advanced",
+      "level": 0.0,
+      "sessions_done": 0,
+      "completed": false,
+      "is_current": false
+    }
+  ],
+  "completed_topics": [
+    {
+      "topic": "filosofía antigua",
+      "completed_at": "2026-06-05T12:00:00"
     }
   ],
   "recent_mistakes": [
     {
-      "concept": "generics",
-      "error_description": "Not quite. The answer is: The correct understanding...",
-      "question_text": "q_x1y2z3w4",
-      "user_answer": "A common misconception",
-      "timestamp": "2026-06-08T14:15:00Z"
+      "concept": "ontología fundamentals",
+      "error_description": "Casi, pero no es correcta...",
+      "question_text": "¿Qué estudia principalmente la ontología?",
+      "user_answer": "2",
+      "timestamp": "2026-06-10T21:30:00"
     }
   ]
 }
@@ -262,15 +362,25 @@ GET /api/progress/{user_id}
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
-| `streak` | integer | Días consecutivos de estudio |
-| `concept_mastery` | array | Nivel de dominio por concepto (0–100) |
+| `current_topic` | string | Topic activo |
+| `streak` | int | Días consecutivos de estudio |
+| `cycle` | object | Estado del ciclo actual |
+| `cycle.concept_index` | int | Qué concepto (0, 1, 2) |
+| `cycle.day_in_cycle` | int | Qué día (1, 2, 3) |
+| `topic_progress` | object | Progreso del topic actual |
+| `topic_progress.status` | string | `"in_progress"` o `"completed"` |
+| `topic_progress.concepts_completed` | int | 0 a 3 |
+| `concept_mastery` | array | Nivel por concepto |
+| `concept_mastery[].is_current` | bool | Es el concepto activo |
+| `concept_mastery[].sessions_done` | int | Días estudiados (0-3) |
+| `completed_topics` | array | Historial de temas completados |
 | `recent_mistakes` | array | Últimos 5 errores |
 
 ---
 
 ### Chat Tutor
 
-> **Chat libre con el tutor IA.** Incluye contexto del historial del estudiante.
+> **Chat libre con el tutor IA.** Incluye contexto del historial, áreas débiles y memoria del usuario.
 
 ```
 POST /api/chat
@@ -279,77 +389,183 @@ POST /api/chat
 **Body:**
 ```json
 {
-  "user_id": "a1b2c3d4e5f6...",
-  "message": "¿Puedes explicarme los decoradores con un ejemplo?"
+  "user_id": "fd3878bf89f7...",
+  "message": "¿Puedes explicarme la ontología con un ejemplo?"
 }
 ```
 
 **Respuesta (200):**
 ```json
 {
-  "response": "¡Buena pregunta sobre Python! He notado que has tenido dificultad con decoradores. Un decorador es esencialmente una función que toma otra función y retorna una nueva función..."
+  "response": "¡Buena pregunta sobre ontología! Has estado estudiando los fundamentos. La ontología es la rama de la filosofía que pregunta qué cosas existen..."
 }
 ```
 
 ---
 
+### Sugerencias
+
+> **Sugerencias personalizadas** basadas en: temas estudiados, áreas débiles, intereses del usuario.
+
+```
+POST /api/suggestions
+```
+
+**Body:**
+```json
+{
+  "user_id": "fd3878bf89f7..."
+}
+```
+
+**Respuesta (200):**
+```json
+[
+  "Ética",
+  "Lógica Formal",
+  "Escepticismo"
+]
+```
+
+| Nota | Descripción |
+|------|-------------|
+| No sugiere | Temas ya completados por el usuario |
+| Prioriza | Áreas débiles identificadas en quizzes |
+| Formato | Array de exactamente 3 strings (1-2 palabras cada uno) |
+
+---
+
+## Ciclo de aprendizaje
+
+### Flujo completo
+
+```
+1. POST /api/users/               → Crear usuario con topic
+2. POST /api/daily-session        → Día 1: fundamentals
+3. POST /api/submit-answer ×3     → Responder quiz
+4. POST /api/daily-session        → Día 2: fundamentals (refuerzo)
+5. POST /api/submit-answer ×3
+6. POST /api/daily-session        → Día 3: fundamentals (evaluación)
+7. POST /api/submit-answer ×3
+   └── fundamentals completado → avanza a practice
+8. POST /api/daily-session        → Día 4: practice
+   ... (repetir 3 días más)
+11. POST /api/daily-session       → Día 7: advanced
+    ... (repetir 3 días más)
+14. Topic completado → cycle_info.topic_completed = true
+15. POST /api/suggestions         → Obtener sugerencias
+16. PATCH /api/users/{id}         → Cambiar a nuevo topic
+17. Repetir desde paso 2
+```
+
+### Avance automático
+
+| Día | concept_day | concept_index | Concepto |
+|-----|-------------|---------------|----------|
+| 1 | 1 | 0 | fundamentals |
+| 2 | 2 | 0 | fundamentals |
+| 3 | 3 | 0 | fundamentals |
+| 4 | 1 | 1 | practice |
+| 5 | 2 | 1 | practice |
+| 6 | 3 | 1 | practice |
+| 7 | 1 | 2 | advanced |
+| 8 | 2 | 2 | advanced |
+| 9 | 3 | 2 | advanced |
+
+Después del día 9:
+- `topic_progress.status` → `"completed"`
+- `user.current_topic` → `""` (reseteado)
+- `user_memory.topics_studied` → agrega el topic completado
+
+---
+
 ## Modelos de Datos
 
-### Usuario
+### Users
 ```
-id          : string (UUID hex)
-topic       : string
-daily_time  : integer (minutos)
-created_at  : datetime (UTC)
-```
-
-### Concepto
-```
-id   : string (UUID hex)
-name : string (único)
+id                    : string (UUID hex, PK)
+daily_time            : integer (minutos)
+current_topic         : string
+current_concept_index : integer (0, 1, 2)
+concept_day           : integer (1, 2, 3)
+concept_start_date    : datetime | null
+created_at            : datetime (UTC)
 ```
 
-### UserConcept (Dominio)
+### Concepts
 ```
-user_id       : string (FK → User)
-concept_id    : string (FK → Concept)
+id   : string (UUID hex, PK)
+name : string (único, ej: "ontología fundamentals")
+```
+
+### UserConcepts
+```
+id            : string (UUID hex, PK)
+user_id       : string (FK → Users)
+concept_id    : string (FK → Concepts)
 mastery_level : float (0–100)
+sessions_done : integer (0–3)
+completed     : boolean
 last_reviewed : datetime | null
-next_review   : datetime | null (spaced repetition)
+next_review   : datetime | null
 ```
 
-### Error (Mistake)
+### TopicProgress
 ```
-user_id           : string (FK → User)
-concept_id        : string (FK → Concept)
+id                   : string (UUID hex, PK)
+user_id              : string (FK → Users)
+topic                : string
+status               : string ("in_progress" | "completed")
+concepts_completed   : integer (0–3)
+started_at           : datetime
+completed_at         : datetime | null
+```
+
+### UserMemory
+```
+id             : string (UUID hex, PK)
+user_id        : string (FK → Users, unique)
+interests      : text (JSON array)
+weak_areas     : text (JSON array)
+topics_studied : text (JSON array)
+learning_style : text
+notes          : text
+updated_at     : datetime
+```
+
+### LearningSessions
+```
+id                : string (UUID hex, PK)
+user_id           : string (FK → Users)
+topic             : string
+concept_name      : string
+day_in_cycle      : integer (1, 2, 3)
+date              : datetime
+concepts_covered  : text
+```
+
+### QuizQuestions
+```
+id                    : string (UUID hex, PK)
+session_id            : string (FK → LearningSessions)
+user_id               : string (FK → Users)
+question_index        : integer
+question              : text
+options               : text (JSON array de 4 strings)
+correct_answer_index  : integer (0–3)
+concept               : string
+created_at            : datetime
+```
+
+### Mistakes
+```
+id                : string (UUID hex, PK)
+user_id           : string (FK → Users)
+concept_id        : string (FK → Concepts)
 error_description : text
 question_text     : text
 user_answer       : text
 timestamp         : datetime
-```
-
----
-
-## Flujo de Uso
-
-```
-1. POST /api/users/          → Crear usuario, obtener user_id
-2. POST /api/daily-session   → Obtener lección + quiz del día
-3. POST /api/submit-answer   → Enviar cada respuesta (repetir por cada pregunta)
-4. GET  /api/progress/{id}   → Ver progreso y racha
-5. POST /api/chat            → Preguntar al tutor sobre dudas
-```
-
-**Ciclo diario:**
-```
-┌─────────────────────────────────────────┐
-│  1. App solicita sesión diaria           │
-│  2. Backend genera lección + quiz        │
-│  3. Usuario responde preguntas           │
-│  4. Backend evalúa y actualiza dominio   │
-│  5. Spaced repetition agenda próximo     │
-│     review basado en rendimiento         │
-└─────────────────────────────────────────┘
 ```
 
 ---
@@ -360,11 +576,10 @@ timestamp         : datetime
 
 ```env
 # Base de datos
-DATABASE_URL=sqlite:///./ai_tutor.db
+DATABASE_URL=sqlite:////app/data/ai_tutor.db
 
-# IA — OpenCode Zen (DeepSeek V4 Flash Free)
+# IA — OpenCode Zen (sin API key)
 AI_PROVIDER=opencode
-AI_API_KEY=tu-api-key-aqui
 AI_MODEL=deepseek-v4-flash-free
 AI_BASE_URL=https://opencode.ai/zen/v1
 
@@ -373,14 +588,6 @@ REVIEW_INTERVAL_BASE_HOURS=24
 MASTERY_INCREASE_ON_CORRECT=10.0
 MASTERY_DECREASE_ON_WRONG=-15.0
 ```
-
-### Obtener API Key de OpenCode
-
-1. Ir a [opencode.ai](https://opencode.ai)
-2. Crear cuenta gratuita
-3. Ir a Settings → API Keys
-4. Crear una nueva API key
-5. Copiarla en `.env` como `AI_API_KEY`
 
 ### Cambiar a PostgreSQL
 
@@ -410,29 +617,6 @@ DATABASE_URL=postgresql://user:password@localhost:5432/ai_tutor
 
 ---
 
-## Spaced Repetition — Cómo Funciona
-
-El sistema adapta la frecuencia de revisión según el rendimiento:
-
-| Condición | Acción |
-|-----------|--------|
-| Respuesta correcta | +10 dominio, próxima revisión se aleja |
-| Respuesta incorrecta | -15 dominio, próxima revisión en 1 hora |
-| Concepto nuevo | Se agrega al pool de estudio |
-| Dominio < 40 | Se prioriza en la sesión diaria |
-| Sin revisar recientemente | Se agenda para review |
-
-**Fórmula de intervalo:**
-```
-next_review = now + (base_hours × (1 + mastery_level / 50))
-```
-
-- Dominio 0 → revisión en 24h
-- Dominio 50 → revisión en 36h
-- Dominio 100 → revisión en 72h
-
----
-
 ## Ejemplo Completo (cURL)
 
 ```bash
@@ -441,72 +625,40 @@ API="https://ai-tutor.sebastianmorales.sbs"
 # 1. Crear usuario
 curl -X POST $API/api/users/ \
   -H "Content-Type: application/json" \
-  -d '{"topic": "Python", "daily_time": 20}'
+  -d '{"topic": "ontología", "daily_time": 15}'
+# Respuesta: {"id": "fd3878bf...", ...}
 
-# Respuesta: {"id": "abc123", ...}
-
-# 2. Obtener sesión diaria
+# 2. Obtener sesión diaria (Día 1)
 curl -X POST $API/api/daily-session \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "abc123"}'
+  -d '{"user_id": "fd3878bf..."}'
+# Respuesta: {lesson, quiz, cycle_info}
 
-# 3. Enviar respuesta
+# 3. Enviar respuestas
 curl -X POST $API/api/submit-answer \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "abc123", "question_id": "q_xyz", "answer": "The correct understanding of decorators"}'
+  -d '{"user_id": "fd3878bf...", "question_id": "q_349ed59f", "answer": "0"}'
 
 # 4. Ver progreso
-curl $API/api/progress/abc123
+curl $API/api/progress/fd3878bf...
 
 # 5. Chat con tutor
 curl -X POST $API/api/chat \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "abc123", "message": "Explícame los decoradores"}'
+  -d '{"user_id": "fd3878bf...", "message": "Explícame la ontología"}'
+
+# 6. Obtener sugerencias
+curl -X POST $API/api/suggestions \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": "fd3878bf..."}'
+# Respuesta: ["Ética", "Lógica", "Epistemología"]
+
+# 7. Cambiar topic (después de completar uno)
+curl -X PATCH $API/api/users/fd3878bf... \
+  -H "Content-Type: application/json" \
+  -d '{"current_topic": "epistemología"}'
 ```
 
 ---
 
-## Ejemplo con Python (requests)
-
-```python
-import requests
-
-BASE = "https://ai-tutor.sebastianmorales.sbs"
-
-# Crear usuario
-r = requests.post(f"{BASE}/api/users/", json={
-    "topic": "Python",
-    "daily_time": 20
-})
-user = r.json()
-user_id = user["id"]
-
-# Sesión diaria
-r = requests.post(f"{BASE}/api/daily-session", json={"user_id": user_id})
-session = r.json()
-
-print(f"Lección: {session['lesson']['title']}")
-for q in session["quiz"]:
-    print(f"\nPregunta: {q['question']}")
-    for i, opt in enumerate(q["options"]):
-        print(f"  {i+1}. {opt}")
-
-# Responder primera pregunta
-r = requests.post(f"{BASE}/api/submit-answer", json={
-    "user_id": user_id,
-    "question_id": session["quiz"][0]["question_id"],
-    "answer": session["quiz"][0]["options"][0]
-})
-result = r.json()
-print(f"\n{'✓' if result['correct'] else '✗'} {result['feedback']}")
-
-# Ver progreso
-r = requests.get(f"{BASE}/api/progress/{user_id}")
-progress = r.json()
-print(f"\nRacha: {progress['streak']} días")
-print(f"Conceptos: {len(progress['concept_mastery'])}")
-```
-
----
-
-*Generado para AI Tutor Backend v0.1.0 — OpenCode Zen / DeepSeek V4 Flash Free*
+*API Documentation — AI Tutor Backend v0.2.0 — OpenCode Zen / DeepSeek V4 Flash Free*
