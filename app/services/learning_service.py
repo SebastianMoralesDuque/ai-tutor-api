@@ -107,18 +107,26 @@ class LearningService:
         )
 
         # ── Generate quiz (3 questions about this concept) ──
+        import logging
+        _log = logging.getLogger("ai-tutor.quiz")
         quiz = await self.ai.generate_quiz(
             topic=topic,
             lesson=lesson,
             concepts=[current_concept],
             mistakes=mistakes,
         )
+        _log.info("Quiz RAW from AI: %d questions", len(quiz))
+        for i, q in enumerate(quiz):
+            _log.info("  [%d] correct_answer_index=%s type=%s options=%d",
+                      i, q.get("correct_answer_index"), type(q.get("correct_answer_index")).__name__, len(q.get("options", [])))
 
         # ── Validate correctAnswerIndex for each question (safety net) ──
+        pre_filter = len(quiz)
         quiz = [
             q for q in quiz
             if isinstance(q.get("correct_answer_index"), int) and 0 <= q["correct_answer_index"] <= 3
         ]
+        _log.info("Quiz after filter: %d (was %d)", len(quiz), pre_filter)
 
         # ── Record learning session ──
         from app.db.models import LearningSession
@@ -144,7 +152,9 @@ class LearningService:
                 concept=current_concept,
             )
             db_questions.append(db_q)
+        _log.info("Persisting %d quiz questions for session %s", len(db_questions), session_record.id[:12])
         self.quiz_questions.create_many(db_questions)
+        _log.info("Quiz questions persisted OK")
 
         # ── Advance cycle ──
         self._advance_cycle(user_id, user, concept_index, concept_day, topic)
